@@ -1,0 +1,24 @@
+{
+  "manifestVersion": "1.0.0",
+  "cities": {
+    "hcmc": {
+      "displayName": "TP. Hồ Chí Minh",
+      "assets": [
+        {
+          "name": "hcmc_map.pmtiles",
+          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.0.0/hcmc_map.pmtiles",
+          "sha256": "7c861920f29166c6d3a13e851f53952e09d0d687fa26518cae3d3171a68f2148",
+          "sizeBytes": 28952378,
+          "version": "1.0.0"
+        },
+        {
+          "name": "hcmc_routes_graph.hive",
+          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.0.0/hcmc_routes_graph.hive",
+          "sha256": "65f6f5179d019896e92fccbd5a5e6563137e106d182d1097a1ce1b5f09332465",
+          "sizeBytes": 9318198,
+          "version": "1.0.0"
+        }
+      ]
+    }
+  }
+}
