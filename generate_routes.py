@@ -179,6 +179,52 @@ def generate():
                     
     print(f"Sector-based connectivity added {sector_edges_added} additional directed edges.")
     
+    # ── [1.7/5] Add Cross-River Nearest Neighbors for HCMC ──
+    if args.city == "hcmc":
+        print("Adding HCMC Cross-River Nearest Neighbors...")
+        
+        def get_side(lat, lon):
+            if lat > 10.82:
+                river_lon = 106.72
+            elif lat > 10.79:
+                river_lon = 106.72
+            elif lat > 10.77:
+                river_lon = 106.708 + 0.6 * (lat - 10.77)
+            elif lat > 10.75:
+                river_lon = 106.708 + 0.7 * (10.77 - lat)
+            else:
+                river_lon = 106.722 + 1.3 * (10.75 - lat)
+            return 0 if lon < river_lon else 1
+
+        # Classify all stops
+        sides = [get_side(stop['lat'], stop['lon']) for stop in filtered_stops]
+        
+        cross_edges_added = 0
+        K_CROSS = 4 # Connect each stop to its 4 nearest neighbors on the opposite side
+        
+        for i in range(n_stops):
+            stop_a = filtered_stops[i]
+            side_a = sides[i]
+            
+            # Find all opposite side stops within MAX_DISTANCE_KM
+            opposite_candidates = []
+            for j in range(n_stops):
+                if sides[j] != side_a:
+                    d = distances_matrix[i][j]
+                    if d <= MAX_DISTANCE_KM:
+                        opposite_candidates.append((d, j))
+            
+            opposite_candidates.sort(key=lambda x: x[0])
+            for d, j in opposite_candidates[:K_CROSS]:
+                if (i, j) not in edges:
+                    edges.add((i, j))
+                    cross_edges_added += 1
+                if (j, i) not in edges:
+                    edges.add((j, i))
+                    cross_edges_added += 1
+                    
+        print(f"HCMC Cross-river connectivity added {cross_edges_added} additional directed edges.")
+    
     # ── [2/5] Ensure Sequential Connectivity (Gap Bridging) ──
     print("Running Gap Bridging to ensure sequential connectivity...")
     in_degrees = [0] * n_stops
