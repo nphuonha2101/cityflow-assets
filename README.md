@@ -50,9 +50,9 @@ python generate_routes.py --city hcmc
 ### Bước 4: Biên dịch JSON sang cơ sở dữ liệu nhị phân Hive (Compile to Hive)
 Để game chạy mượt 60 FPS, chúng ta đóng gói các file JSON cồng kềnh sang định dạng nhị phân Hive `.hive`:
 ```bash
-# Cần cài đặt Dart SDK
-dart compile_assets_to_hive.dart hcmc
+python compile_assets_to_hive.py hcmc
 ```
+*(Quy trình chạy hoàn toàn bằng Python 3, không cần cài đặt thêm Dart SDK)*
 *Đầu ra:* `<city>/<city>_bus_stops.hive` và `<city>/<city>_routes_graph.hive`.
 
 ### Bước 5: Chuẩn bị file tại thư mục gốc
@@ -79,6 +79,5 @@ Chạy script tự động hóa để cập nhật manifest và đẩy asset lê
 
 ## 📋 Yêu cầu hệ thống (Prerequisites)
 
-- **Python 3**: các thư viện đi kèm sẵn (`urllib`, `json`, `concurrent.futures`, `argparse`).
-- **Dart SDK**: dùng để chạy compiler Hive (`dart compile_assets_to_hive.dart`). Có thư viện `hive` đi kèm trong global/local cache.
+- **Python 3**: các thư viện đi kèm sẵn (`urllib`, `json`, `concurrent.futures`, `argparse`, `zlib`, `struct`).
 - **GitHub CLI (`gh`)**: cài đặt trên thiết bị và đã đăng nhập bằng lệnh `gh auth login` để có quyền đẩy release lên GitHub.
