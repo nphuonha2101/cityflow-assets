@@ -163,7 +163,29 @@ def main():
                 max_dist = max(dist_a, dist_b, 1.0)
                 diff = abs(dist_a - dist_b) / max_dist
                 
+                is_symmetric = False
                 if diff < 0.05:
+                    coords_a = decode_polyline(polyline_a)
+                    coords_b = decode_polyline(polyline_b)
+                    coords_b_rev = list(reversed(coords_b))
+                    
+                    n = min(len(coords_a), len(coords_b_rev), 5)
+                    if n >= 2:
+                        idx_a = [int(i * (len(coords_a) - 1) / (n - 1)) for i in range(n)]
+                        idx_b = [int(i * (len(coords_b_rev) - 1) / (n - 1)) for i in range(n)]
+                        
+                        max_offset_km = max(
+                            calculate_distance(coords_a[i][0], coords_a[i][1], coords_b_rev[j][0], coords_b_rev[j][1])
+                            for i, j in zip(idx_a, idx_b)
+                        )
+                    else:
+                        max_offset_km = 0.0
+                        
+                    # If maximum coordinate offset is less than 50 meters (0.05 km)
+                    if max_offset_km < 0.05:
+                        is_symmetric = True
+                
+                if is_symmetric:
                     canonical_key = key if key < rev_key else rev_key
                     canonical_val = routes_data[canonical_key]
                     deduped_routes[canonical_key] = canonical_val
