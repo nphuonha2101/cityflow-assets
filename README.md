@@ -8,29 +8,22 @@ Kho lưu trữ này lưu trữ các asset bản đồ thô, đồ thị di chuy�
 
 ```mermaid
 graph TD
-    A[1. Tải dữ liệu OSM thô từ Overpass API] -->|raw_hcmc_bus_stops.json| B[2. Nén & làm sạch trạm<br>compress_stops.py]
+    A[1. Tải dữ liệu OSM thô<br>download_stops.py] -->|raw_hcmc_bus_stops.json| B[2. Nén & làm sạch trạm<br>compress_stops.py]
     B -->|hcmc/hcmc_bus_stops.json| C[3. Tính toán trước đường đi OSRM<br>generate_routes.py]
-    B -->|hcmc/hcmc_bus_stops.json| D[4. Biên dịch JSON sang Hive<br>compile_assets_to_hive.dart]
+    B -->|hcmc/hcmc_bus_stops.json| D[4. Biên dịch JSON sang Hive<br>compile_assets_to_hive.py]
     C -->|hcmc/hcmc_routes_graph.json| D
     D -->|hcmc/hcmc_bus_stops.hive| E[5. Đưa ra thư mục gốc để Publish]
     E --> F[6. Xuất bản Release lên GitHub<br>publish.py]
 ```
 
-### Bước 1: Tải dữ liệu thô (Raw OSM Data)
-Tải danh sách các trạm xe buýt từ Overpass API cho thành phố mong muốn dưới dạng JSON và lưu vào thư mục thành phố (ví dụ: `<city>/raw_<city>_bus_stops.json`).
-
-*Gợi ý Overpass QL Query cho TP.HCM:*
-```overpassql
-[out:json][timeout:25];
-area["name"="Thành phố Hồ Chí Minh"]->.searchArea;
-(
-  node["highway"="bus_stop"](area.searchArea);
-  node["public_transport"="platform"]["bus"="yes"](area.searchArea);
-);
-out body;
->;
-out skel qt;
+### Bước 1: Tải dữ liệu thô tự động (Download Raw OSM Data)
+Chạy script để tự động tải danh sách trạm xe buýt từ Overpass API về thư mục của thành phố tương ứng:
+```bash
+python download_stops.py --city hcmc
 ```
+- **Xử lý lỗi HTTP 429 (Rate Limit)**: Script tự động truy cập trang trạng thái `/status` để xem khi nào có slot trống để đợi, tự động xoay tua truy vấn (rotate) qua 3 máy chủ Overpass API gương công cộng khác nhau, và áp dụng Exponential Backoff để thử lại an toàn.
+- **Tùy biến**: Bạn có thể tùy biến địa danh OSM bằng tham số `--area-name` (Ví dụ: `python download_stops.py --city hcmc --area-name "Tỉnh Bình Dương"`).
+*Đầu ra:* file thô lưu tại `<city>/raw_<city>_bus_stops.json`.
 
 ### Bước 2: Nén và làm sạch danh sách trạm (Clean & Compress)
 Chạy script để lọc bỏ các tag không cần thiết và giảm kích thước file:
