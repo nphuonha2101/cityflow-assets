@@ -139,6 +139,45 @@ def generate():
                 edges.add((i, j))
                 
     print(f"Generated {len(edges)} candidate edges using adaptive radius.")
+
+    # ── [1.5/5] Add Sector-Based Nearest Neighbors (Directional/Cross-river Connectivity) ──
+    print("Adding Sector-Based Nearest Neighbors...")
+    NUM_SECTORS = 8
+    sector_edges_added = 0
+    for i in range(n_stops):
+        stop_a = filtered_stops[i]
+        # Keep track of the closest stop in each of the 8 sectors: (distance, index)
+        closest_in_sectors = [None] * NUM_SECTORS
+        
+        for j in range(n_stops):
+            if i == j:
+                continue
+            d = distances_matrix[i][j]
+            if d > MAX_DISTANCE_KM:
+                continue
+                
+            stop_b = filtered_stops[j]
+            # Calculate angle / bearing from stop_a to stop_b
+            dlon = stop_b['lon'] - stop_a['lon']
+            dlat = stop_b['lat'] - stop_a['lat']
+            angle = math.atan2(dlon, dlat) # bearing in radians between [-pi, pi]
+            
+            # Map to sector [0..7]
+            sector_idx = int(((angle + math.pi) / (2 * math.pi)) * NUM_SECTORS) % NUM_SECTORS
+            
+            current_best = closest_in_sectors[sector_idx]
+            if current_best is None or d < current_best[0]:
+                closest_in_sectors[sector_idx] = (d, j)
+                
+        # Add the closest stop in each sector to edges
+        for item in closest_in_sectors:
+            if item is not None:
+                _, j = item
+                if (i, j) not in edges:
+                    edges.add((i, j))
+                    sector_edges_added += 1
+                    
+    print(f"Sector-based connectivity added {sector_edges_added} additional directed edges.")
     
     # ── [2/5] Ensure Sequential Connectivity (Gap Bridging) ──
     print("Running Gap Bridging to ensure sequential connectivity...")
