@@ -15,11 +15,8 @@ OVERPASS_ENDPOINTS = [
     "https://z.overpass-api.de/api/interpreter"
 ]
 
-# City OSM Area Names Mapping
-CITY_AREAS = {
-    "hcmc": "Thành phố Hồ Chí Minh",
-    "hanoi": "Thành phố Hà Nội"
-}
+from city_configs import CITY_CONFIGS
+
 
 def get_overpass_query(area_name):
     return f"""[out:json][timeout:90];
@@ -134,7 +131,7 @@ def fetch_with_retry(query, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Download city bus stops from OSM Overpass API with HTTP 429 handling.")
-    parser.add_argument("--city", type=str, default="hcmc", choices=["hcmc", "hanoi"], help="Select city to download stops for")
+    parser.add_argument("--city", type=str, default="hcmc", choices=list(CITY_CONFIGS.keys()), help="Select city to download stops for")
     parser.add_argument("--area-name", type=str, help="Override OSM area query name")
     args = parser.parse_args()
     
@@ -144,7 +141,7 @@ def main():
     
     output_file = os.path.join(city_dir, f"raw_{args.city}_bus_stops.json")
     
-    area_name = args.area_name if args.area_name else CITY_AREAS[args.city]
+    area_name = args.area_name if args.area_name else CITY_CONFIGS[args.city]["name"]
     
     print("=== CityFlow OSM Overpass Downloader ===")
     print(f"City: {args.city.upper()}")

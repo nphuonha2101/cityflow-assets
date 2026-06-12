@@ -15,25 +15,11 @@ parser.add_argument("--min-lat", type=float, help="Override minimum latitude")
 parser.add_argument("--max-lat", type=float, help="Override maximum latitude")
 parser.add_argument("--min-lon", type=float, help="Override minimum longitude")
 parser.add_argument("--max-lon", type=float, help="Override maximum longitude")
+parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
 args, unknown = parser.parse_known_args()
 
-# City configurations matching CityConfig presets in the game
-CITY_CONFIGS = {
-    "hcmc": {
-        "min_lat": 10.30,
-        "max_lat": 11.25,
-        "min_lon": 106.35,
-        "max_lon": 107.25,
-        "folder": "hcmc"
-    },
-    "hanoi": {
-        "min_lat": 21.015,
-        "max_lat": 21.040,
-        "min_lon": 105.840,
-        "max_lon": 105.868,
-        "folder": "hanoi"
-    }
-}
+
+from city_configs import CITY_CONFIGS
 
 config = CITY_CONFIGS[args.city]
 MIN_LAT = args.min_lat if args.min_lat is not None else config["min_lat"]
@@ -57,7 +43,7 @@ def fetch_pair(stop_a, stop_b, idx, total):
     # Try localhost first (fast local OSRM), then public fallback
     urls = [
         f"http://localhost:5000/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline",
-        f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
+        # f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
     ]
     
     for url in urls:
@@ -141,29 +127,32 @@ def generate():
 
     total_to_fetch = len(needed_pairs)
     
-    print(f"Starting parallel fetch with 16 workers...")
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        futures = {
-            executor.submit(fetch_pair, stop_a, stop_b, i, total_to_fetch): (stop_a, stop_b)
-            for i, (stop_a, stop_b) in enumerate(needed_pairs)
-        }
-        
-        for future in as_completed(futures):
-            key, polyline, message = future.result()
-            print(message)
-            if polyline:
-                with cache_lock:
-                    routes_cache[key] = polyline
-                    count_success += 1
-                # Periodically save progress
-                if count_success % 50 == 0:
-                    save_cache()
-                    print("--- Saved progress ---")
-            else:
-                count_failed += 1
+    print(f"Starting parallel fetch with {args.workers} workers in batches of 5000...")
+    batch_size = 5000
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        for batch_start in range(0, total_to_fetch, batch_size):
+            batch_pairs = needed_pairs[batch_start:batch_start + batch_size]
+            print(f"\nProcessing batch {batch_start//batch_size + 1} ({batch_start} to {batch_start + len(batch_pairs)} of {total_to_fetch})...")
+            
+            futures = {
+                executor.submit(fetch_pair, stop_a, stop_b, batch_start + i, total_to_fetch): (stop_a, stop_b)
+                for i, (stop_a, stop_b) in enumerate(batch_pairs)
+            }
+            
+            for future in as_completed(futures):
+                key, polyline, message = future.result()
+                print(message)
+                if polyline:
+                    with cache_lock:
+                        routes_cache[key] = polyline
+                        count_success += 1
+                else:
+                    count_failed += 1
+            
+            # Save progress after each batch
+            save_cache()
+            print(f"--- Saved progress. Total success: {count_success}, Failed: {count_failed} ---")
 
-    # Final save
-    save_cache()
     print(f"\nCompleted! Success: {count_success}, Failed: {count_failed}")
     print(f"Total routes saved in cache: {len(routes_cache)}")
 
