@@ -48,25 +48,18 @@ python compile_assets_to_hive.py hcmc
 *(Quy trình chạy hoàn toàn bằng Python 3, không cần cài đặt thêm Dart SDK)*
 *Đầu ra:* `<city>/<city>_bus_stops.hive` và `<city>/<city>_routes_graph.hive`.
 
-### Bước 5: Chuẩn bị file tại thư mục gốc
-Copy file `.hive` và `.pmtiles` của thành phố ra thư mục gốc:
-```bash
-cp hcmc/hcmc_routes_graph.hive ./
-# Đảm bảo có cả file map vector tương ứng
-# cp <path_to_map>/hcmc_map.pmtiles ./
-```
-
-### Bước 6: Xuất bản lên GitHub (Publish Release)
+### Bước 5: Xuất bản lên GitHub (Publish Release)
 Chạy script tự động hóa để cập nhật manifest và đẩy asset lên release của GitHub:
 ```bash
 ./publish.py
 ```
 *Quy trình tự động của `publish.py`:*
-1. Quét file `hcmc_map.pmtiles` và `hcmc_routes_graph.hive` ở thư mục gốc.
+1. Tự động quét các file tài nguyên `{city_id}_map.pmtiles`, `{city_id}_routes_graph.hive`, và `{city_id}_bus_stops.hive` trực tiếp từ các thư mục thành phố tương ứng (ví dụ: `hcmc/`).
 2. Tính toán mã băm SHA256 và kích thước file.
-3. Nếu file có sự thay đổi, tự động tăng phiên bản (ví dụ `1.0.0` $\rightarrow$ `1.0.1`) trong `assets_manifest.json`.
-4. Commit và push `assets_manifest.json` lên nhánh `main`.
-5. Tạo GitHub Release với thẻ tag (ví dụ `v1.0.1`) và tải các asset lên đó thông qua GitHub CLI (`gh`).
+3. Nếu file có sự thay đổi, tự động tăng phiên bản (ví dụ `1.0.0` $\rightarrow$ `1.0.1`) trong `assets_manifest.json` và cập nhật đường dẫn tải về.
+4. Nếu file không thay đổi, giữ nguyên URL của Release trước đó và phiên bản cũ (tiết kiệm thời gian và băng thông).
+5. Tạo GitHub Release với thẻ tag (ví dụ `v1.0.2`), tự động đẩy các file có thay đổi lên thông qua GitHub CLI (`gh`).
+6. Commit và push `assets_manifest.json` đã cập nhật lên nhánh `main`.
 
 ---
 

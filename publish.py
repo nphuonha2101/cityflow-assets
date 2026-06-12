@@ -132,9 +132,7 @@ def main():
         print("Warning: No changed city assets found to upload. Manifest will be updated locally.")
         confirm = input("\nDo you want to commit/push the updated manifest anyway? (y/n): ").strip().lower()
         if confirm != 'y':
-            with open(manifest_path, 'w', encoding='utf-8') as f:
-                json.dump(manifest, f, indent=2, ensure_ascii=False)
-            print(f"Manifest successfully updated and written to '{manifest_path}'.")
+            print("Publishing cancelled. Manifest was NOT updated.")
             sys.exit(0)
             
         # If yes, we save and commit without gh release create
@@ -155,16 +153,17 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    # 4. Save manifest
+    # 4. Confirm and deploy
+    confirm = input(f"\nDo you want to commit/push and publish release '{tag}' now? (y/n): ").strip().lower()
+    if confirm != 'y':
+        print("Publishing cancelled. Manifest was NOT updated.")
+        sys.exit(0)
+
+    # Save manifest
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"\nManifest successfully updated and written to '{manifest_path}'.")
 
-    # 5. Confirm and deploy
-    confirm = input(f"\nDo you want to commit/push and publish release '{tag}' now? (y/n): ").strip().lower()
-    if confirm != 'y':
-        print("Publishing cancelled. Manifest remains updated locally.")
-        sys.exit(0)
 
     try:
         # Commit & push manifest
