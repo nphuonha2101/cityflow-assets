@@ -91,32 +91,99 @@ def generate():
             
     print(f"Total {args.city.upper()} filtered stops: {len(filtered_stops)}")
     
-    # Identify stop pairs with spatial adaptive filtering
-    print(f"Filtering pairs using Spatial Adaptive Filtering:")
-    print(f"  - Close limit: {args.close_dist_km} km")
-    print(f"  - K-Nearest: {K_NEIGHBORS} neighbors")
-    print(f"  - Max limit: {args.max_dist_km} km")
+    # ── [1/5] Compute Adaptive Radii (Adaptive Radius with Power Scaling) ──
+    print("Computing adaptive radii for all stops...")
+    n_stops = len(filtered_stops)
     
-    pairs_to_fetch = []
-    for i, stop_a in enumerate(filtered_stops):
-        # Find candidates within max distance
-        candidates = []
-        for j, stop_b in enumerate(filtered_stops):
+    # Compute all pairwise distances (in km)
+    distances_matrix = [[0.0] * n_stops for _ in range(n_stops)]
+    for i in range(n_stops):
+        stop_a = filtered_stops[i]
+        for j in range(i + 1, n_stops):
+            stop_b = filtered_stops[j]
+            d = calculate_distance(stop_a['lat'], stop_a['lon'], stop_b['lat'], stop_b['lon'])
+            distances_matrix[i][j] = d
+            distances_matrix[j][i] = d
+
+    # For each stop, compute the average distance to its k-nearest neighbors (k=6)
+    k_val = min(6, n_stops - 1)
+    avg_neighbor_dists = []
+    for i in range(n_stops):
+        dists = sorted([distances_matrix[i][j] for j in range(n_stops) if i != j])
+        k_dists = dists[:k_val]
+        avg_d = sum(k_dists) / len(k_dists) if k_dists else 0.5
+        avg_neighbor_dists.append(avg_d)
+        
+    global_avg = sum(avg_neighbor_dists) / len(avg_neighbor_dists) if avg_neighbor_dists else 0.5
+    
+    # Calculate adaptive radii: base_radius * (avg_neighbor_dist / global_avg) ** power
+    base_r = CLOSE_DISTANCE_KM
+    min_r = 0.2
+    max_r = MAX_DISTANCE_KM
+    power = 0.7
+    
+    radii = []
+    for avg_d in avg_neighbor_dists:
+        r = base_r * (avg_d / global_avg) ** power if global_avg > 0 else base_r
+        r = max(min_r, min(max_r, r))
+        radii.append(r)
+        
+    # Generate candidate edges
+    edges = set()
+    for i in range(n_stops):
+        r = radii[i]
+        for j in range(n_stops):
             if i == j:
                 continue
-            dist = calculate_distance(stop_a['lat'], stop_a['lon'], stop_b['lat'], stop_b['lon'])
-            if dist <= MAX_DISTANCE_KM:
-                candidates.append((dist, stop_b))
+            if distances_matrix[i][j] <= r:
+                edges.add((i, j))
+                
+    print(f"Generated {len(edges)} candidate edges using adaptive radius.")
+    
+    # ── [2/5] Ensure Sequential Connectivity (Gap Bridging) ──
+    print("Running Gap Bridging to ensure sequential connectivity...")
+    in_degrees = [0] * n_stops
+    out_degrees = [0] * n_stops
+    for u, v in edges:
+        out_degrees[u] += 1
+        in_degrees[v] += 1
         
-        # Sort candidates by distance (ascending)
-        candidates.sort(key=lambda x: x[0])
-        
-        # Add stop pairs that satisfy close distance OR are one of the K nearest neighbors
-        for idx, (dist, stop_b) in enumerate(candidates):
-            if dist <= CLOSE_DISTANCE_KM or idx < K_NEIGHBORS:
-                pairs_to_fetch.append((stop_a, stop_b))
+    isolated = [n for n in range(n_stops) if in_degrees[n] == 0 or out_degrees[n] == 0]
+    print(f"Found {len(isolated)} isolated stops (in/out degree = 0).")
+    
+    new_edges_added = 0
+    max_gap_km = 15.0
+    for node in isolated:
+        for multiplier in [2.0, 3.0, 5.0, 10.0]:
+            extended_r = radii[node] * multiplier
+            if extended_r > max_gap_km:
+                break
             
-    print(f"Prepared {len(pairs_to_fetch)} stop pairs to fetch routes for.")
+            candidates = []
+            for j in range(n_stops):
+                if j == node:
+                    continue
+                d = distances_matrix[node][j]
+                if d <= extended_r:
+                    candidates.append((d, j))
+                    
+            candidates.sort(key=lambda x: x[0])
+            if len(candidates) >= 2:
+                for d, j in candidates[:3]:
+                    if (node, j) not in edges:
+                        edges.add((node, j))
+                        new_edges_added += 1
+                    if (j, node) not in edges:
+                        edges.add((j, node))
+                        new_edges_added += 1
+                break
+                
+    print(f"Gap bridging added {new_edges_added} additional directed edges.")
+    
+    # Convert edges to stop pairs
+    pairs_to_fetch = []
+    for u, v in edges:
+        pairs_to_fetch.append((filtered_stops[u], filtered_stops[v]))
     
     # Load existing precalculated routes if file exists to resume/avoid duplicate calls
     routes_cache = {}

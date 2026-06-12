@@ -4,6 +4,59 @@ import sys
 import json
 import struct
 import zlib
+import math
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    rlat1, rlon1, rlat2, rlon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = rlat2 - rlat1
+    dlon = rlon2 - rlon1
+    a = math.sin(dlat/2)**2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    return c * 6371.0  # in km
+
+def decode_polyline(polyline_str):
+    coordinates = []
+    index = 0
+    lat = 0
+    lng = 0
+    try:
+        while index < len(polyline_str):
+            shift = 0
+            result = 0
+            while True:
+                b = ord(polyline_str[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if not (b & 0x20):
+                    break
+            dlat = ~(result >> 1) if (result & 1) else (result >> 1)
+            lat += dlat
+            
+            shift = 0
+            result = 0
+            while True:
+                b = ord(polyline_str[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if not (b & 0x20):
+                    break
+            dlng = ~(result >> 1) if (result & 1) else (result >> 1)
+            lng += dlng
+            coordinates.append((lat / 1e5, lng / 1e5))
+    except Exception:
+        pass
+    return coordinates
+
+def calculate_polyline_distance(polyline_str):
+    coords = decode_polyline(polyline_str)
+    if not coords:
+        return 0.0
+    dist = 0.0
+    for i in range(len(coords) - 1):
+        dist += calculate_distance(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1])
+    return dist * 1000.0  # in meters
 
 def write_varint(value):
     out = bytearray()
@@ -80,9 +133,62 @@ def main():
         with open(routes_json_path, 'r', encoding='utf-8') as f:
             routes_data = json.load(f)
             
+        print(f"Loaded {len(routes_data)} routes. Optimizing symmetric pairs...")
+        
+        processed_keys = set()
+        deduped_routes = {}
+        symmetric_count = 0
+        asymmetric_count = 0
+        single_count = 0
+        
+        for key, val in routes_data.items():
+            if key in processed_keys:
+                continue
+                
+            parts = key.split('-')
+            if len(parts) != 2:
+                deduped_routes[key] = val
+                continue
+                
+            stop_a, stop_b = parts[0], parts[1]
+            rev_key = f"{stop_b}-{stop_a}"
+            
+            if rev_key in routes_data:
+                polyline_a = val
+                polyline_b = routes_data[rev_key]
+                
+                dist_a = calculate_polyline_distance(polyline_a)
+                dist_b = calculate_polyline_distance(polyline_b)
+                
+                max_dist = max(dist_a, dist_b, 1.0)
+                diff = abs(dist_a - dist_b) / max_dist
+                
+                if diff < 0.05:
+                    canonical_key = key if key < rev_key else rev_key
+                    canonical_val = routes_data[canonical_key]
+                    deduped_routes[canonical_key] = canonical_val
+                    symmetric_count += 1
+                else:
+                    deduped_routes[key] = val
+                    deduped_routes[rev_key] = routes_data[rev_key]
+                    asymmetric_count += 2
+                    
+                processed_keys.add(key)
+                processed_keys.add(rev_key)
+            else:
+                deduped_routes[key] = val
+                processed_keys.add(key)
+                single_count += 1
+                
+        print(f"Deduplication complete:")
+        print(f"  - Symmetric pairs detected: {symmetric_count} (removed {symmetric_count} redundant routes)")
+        print(f"  - Asymmetric pairs (kept both): {asymmetric_count}")
+        print(f"  - Single-direction routes: {single_count}")
+        print(f"  - Final routing graph size: {len(deduped_routes)} / {len(routes_data)} routes ({len(deduped_routes)/len(routes_data)*100:.1f}%)")
+        
         routes_hive_path = os.path.join(city_dir, f"{city}_routes_graph.hive")
         with open(routes_hive_path, 'wb') as f:
-            for key, val in routes_data.items():
+            for key, val in deduped_routes.items():
                 val_str = json.dumps(val) if isinstance(val, (dict, list)) else (str(val) if val is not None else "")
                 f.write(build_hive_frame(key, val_str))
         print(f"Successfully compiled routes to: {routes_hive_path} ({os.path.getsize(routes_hive_path)} bytes)")
