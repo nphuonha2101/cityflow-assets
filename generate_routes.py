@@ -16,6 +16,9 @@ parser.add_argument("--max-lat", type=float, help="Override maximum latitude")
 parser.add_argument("--min-lon", type=float, help="Override minimum longitude")
 parser.add_argument("--max-lon", type=float, help="Override maximum longitude")
 parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
+parser.add_argument("--close-dist-km", type=float, default=1.0, help="Radius (in km) within which all stop pairs are precalculated")
+parser.add_argument("--k-neighbors", type=int, default=10, help="Number of nearest neighbors to keep within the maximum distance")
+parser.add_argument("--max-dist-km", type=float, default=6.0, help="Maximum distance (in km) to consider for route generation")
 args, unknown = parser.parse_known_args()
 
 
@@ -28,12 +31,20 @@ MIN_LON = args.min_lon if args.min_lon is not None else config["min_lon"]
 MAX_LON = args.max_lon if args.max_lon is not None else config["max_lon"]
 CITY_FOLDER = config["folder"]
 
-# Closest neighbors to pre-calculate
-K_NEIGHBORS = 4
-MAX_DISTANCE_DEG = 0.0600  # ~6.6 km max threshold (raised from 5.0 km)
+MAX_DISTANCE_KM = args.max_dist_km
+CLOSE_DISTANCE_KM = args.close_dist_km
+K_NEIGHBORS = args.k_neighbors
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    return math.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2)
+    """
+    Calculate the great-circle distance between two points on the earth (in km)
+    """
+    rlat1, rlon1, rlat2, rlon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = rlat2 - rlat1
+    dlon = rlon2 - rlon1
+    a = math.sin(dlat/2)**2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    return c * 6371.0
 
 def fetch_pair(stop_a, stop_b, idx, total):
     key = f"{stop_a['id']}-{stop_b['id']}"
@@ -80,14 +91,29 @@ def generate():
             
     print(f"Total {args.city.upper()} filtered stops: {len(filtered_stops)}")
     
-    # Identify stop pairs
+    # Identify stop pairs with spatial adaptive filtering
+    print(f"Filtering pairs using Spatial Adaptive Filtering:")
+    print(f"  - Close limit: {args.close_dist_km} km")
+    print(f"  - K-Nearest: {K_NEIGHBORS} neighbors")
+    print(f"  - Max limit: {args.max_dist_km} km")
+    
     pairs_to_fetch = []
     for i, stop_a in enumerate(filtered_stops):
+        # Find candidates within max distance
+        candidates = []
         for j, stop_b in enumerate(filtered_stops):
             if i == j:
                 continue
             dist = calculate_distance(stop_a['lat'], stop_a['lon'], stop_b['lat'], stop_b['lon'])
-            if dist <= MAX_DISTANCE_DEG:
+            if dist <= MAX_DISTANCE_KM:
+                candidates.append((dist, stop_b))
+        
+        # Sort candidates by distance (ascending)
+        candidates.sort(key=lambda x: x[0])
+        
+        # Add stop pairs that satisfy close distance OR are one of the K nearest neighbors
+        for idx, (dist, stop_b) in enumerate(candidates):
+            if dist <= CLOSE_DISTANCE_KM or idx < K_NEIGHBORS:
                 pairs_to_fetch.append((stop_a, stop_b))
             
     print(f"Prepared {len(pairs_to_fetch)} stop pairs to fetch routes for.")
@@ -154,7 +180,17 @@ def generate():
             print(f"--- Saved progress. Total success: {count_success}, Failed: {count_failed} ---")
 
     print(f"\nCompleted! Success: {count_success}, Failed: {count_failed}")
-    print(f"Total routes saved in cache: {len(routes_cache)}")
+    
+    # Prune cache to only contain currently requested pairs (reduces file size)
+    active_keys = {f"{stop_a['id']}-{stop_b['id']}" for stop_a, stop_b in pairs_to_fetch}
+    pruned_cache = {k: v for k, v in routes_cache.items() if k in active_keys}
+    pruning_diff = len(routes_cache) - len(pruned_cache)
+    if pruning_diff > 0:
+        print(f"Pruning cache: removed {pruning_diff} stale/unused routes. Active size: {len(pruned_cache)}")
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(pruned_cache, f, separators=(',', ':'), ensure_ascii=False)
+    else:
+        print(f"Total active routes saved in cache: {len(routes_cache)}")
 
 if __name__ == "__main__":
     generate()

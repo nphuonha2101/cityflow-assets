@@ -57,55 +57,103 @@ def main():
         except Exception as e:
             print(f"Warning: Failed to parse existing manifest: {e}. Starting fresh.")
 
-    # 3. Setup HCMC files
-    hcmc_files = ["hcmc_map.pmtiles", "hcmc_routes_graph.hive"]
-    existing_hcmc_assets = {}
+    # 3. Setup city files by scanning configs
+    from city_configs import CITY_CONFIGS
     
-    if "cities" in manifest and "hcmc" in manifest["cities"] and "assets" in manifest["cities"]["hcmc"]:
-        for asset in manifest["cities"]["hcmc"]["assets"]:
-            existing_hcmc_assets[asset["name"]] = asset
-
-    new_assets = []
+    upload_filepaths = []
     
-    for filename in hcmc_files:
-        if not os.path.exists(filename):
-            print(f"Error: Required file '{filename}' not found in current directory.")
-            sys.exit(1)
+    if "cities" not in manifest:
+        manifest["cities"] = {}
+        
+    for city_id, city_conf in CITY_CONFIGS.items():
+        folder = city_conf["folder"]
+        display_name = city_conf["name"]
+        
+        map_filename = f"{city_id}_map.pmtiles"
+        routes_filename = f"{city_id}_routes_graph.hive"
+        stops_filename = f"{city_id}_bus_stops.hive"
+        
+        map_path = os.path.join(folder, map_filename)
+        routes_path = os.path.join(folder, routes_filename)
+        stops_path = os.path.join(folder, stops_filename)
+        
+        # We only process if all three files exist for the city in its folder
+        if not os.path.exists(map_path) or not os.path.exists(routes_path) or not os.path.exists(stops_path):
+            print(f"Skipping city '{city_id}' (some files not found in '{folder}/')")
+            continue
+            
+        print(f"\nProcessing city '{city_id}' ({display_name})...")
+        
+        existing_assets = {}
+        if city_id in manifest["cities"] and "assets" in manifest["cities"][city_id]:
+            for asset in manifest["cities"][city_id]["assets"]:
+                existing_assets[asset["name"]] = asset
 
-        print(f"Processing '{filename}'...")
-        size = os.path.getsize(filename)
-        sha256_hash = get_file_sha256(filename)
-        
-        # Check if changed
-        existing = existing_hcmc_assets.get(filename)
-        version = "1.0.0"
-        
-        if existing:
-            if existing.get("sha256") == sha256_hash and existing.get("sizeBytes") == size:
+        new_assets = []
+        for filename, filepath in [(map_filename, map_path), (routes_filename, routes_path), (stops_filename, stops_path)]:
+            print(f"  Processing '{filepath}'...")
+            size = os.path.getsize(filepath)
+            sha256_hash = get_file_sha256(filepath)
+            
+            # Check if changed
+            existing = existing_assets.get(filename)
+            version = "1.0.0"
+            
+            if existing and existing.get("sha256") == sha256_hash and existing.get("sizeBytes") == size:
                 version = existing.get("version", "1.0.0")
-                print(f"  -> File '{filename}' has NOT changed. Keeping version {version}.")
+                download_url = existing.get("url")
+                print(f"    -> File has NOT changed. Keeping version {version} and URL.")
             else:
-                old_version = existing.get("version", "1.0.0")
-                version = increment_version(old_version)
-                print(f"  -> File '{filename}' CHANGED! Auto-incrementing version {old_version} -> {version}.")
-        else:
-            print(f"  -> File '{filename}' is new. Starting version {version}.")
+                if existing:
+                    old_version = existing.get("version", "1.0.0")
+                    version = increment_version(old_version)
+                    print(f"    -> File CHANGED! Auto-incrementing version {old_version} -> {version}.")
+                else:
+                    print(f"    -> File is new. Starting version {version}.")
+                
+                download_url = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{tag}/{filename}"
+                upload_filepaths.append(filepath)
 
-        download_url = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{tag}/{filename}"
-        
-        new_assets.append({
-            "name": filename,
-            "url": download_url,
-            "sha256": sha256_hash,
-            "sizeBytes": size,
-            "version": version
-        })
+            new_assets.append({
+                "name": filename,
+                "url": download_url,
+                "sha256": sha256_hash,
+                "sizeBytes": size,
+                "version": version
+            })
 
-    # Update manifest
-    manifest["cities"]["hcmc"] = {
-        "displayName": "TP. Hồ Chí Minh",
-        "assets": new_assets
-    }
+        # Update manifest
+        manifest["cities"][city_id] = {
+            "displayName": display_name,
+            "assets": new_assets
+        }
+
+    if not upload_filepaths:
+        print("Warning: No changed city assets found to upload. Manifest will be updated locally.")
+        confirm = input("\nDo you want to commit/push the updated manifest anyway? (y/n): ").strip().lower()
+        if confirm != 'y':
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=2, ensure_ascii=False)
+            print(f"Manifest successfully updated and written to '{manifest_path}'.")
+            sys.exit(0)
+            
+        # If yes, we save and commit without gh release create
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+        print(f"Manifest successfully updated and written to '{manifest_path}'.")
+        try:
+            print("\nAdding and committing manifest...")
+            subprocess.run(["git", "add", manifest_path], check=True)
+            status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+            if status.stdout.strip():
+                subprocess.run(["git", "commit", "-m", f"Update manifest for release {tag}"], check=True)
+            print("Pushing to main branch...")
+            subprocess.run(["git", "push", "origin", "main"], check=True)
+            print("\n=== SUCCESS! Manifest pushed successfully! ===")
+        except subprocess.CalledProcessError as e:
+            print(f"\nError occurred during git deployment: {e}")
+            sys.exit(1)
+        sys.exit(0)
 
     # 4. Save manifest
     with open(manifest_path, 'w', encoding='utf-8') as f:
@@ -134,7 +182,7 @@ def main():
         print(f"Creating GitHub Release '{tag}' and uploading assets...")
         release_cmd = [
             "gh", "release", "create", tag,
-            "hcmc_map.pmtiles", "hcmc_routes_graph.hive",
+            *upload_filepaths,
             "--title", f"Release {tag}",
             "--notes", f"Auto-generated asset release for {tag}"
         ]
