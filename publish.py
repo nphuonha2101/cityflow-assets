@@ -30,6 +30,8 @@ def increment_version(version_str):
     return "1.0.0"
 
 def main():
+    # Change working directory to script's directory so it works from anywhere
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     print("=== CityFlow Assets Auto Publisher ===")
     
     # 1. Ask for release tag
