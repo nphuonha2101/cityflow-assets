@@ -20,7 +20,7 @@
         },
         {
           "name": "hcmc_bus_stops.hive",
-          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.0.2/hcmc_bus_stops.hive",
+          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.0.1/hcmc_bus_stops.hive",
           "sha256": "3aa06dc2dfd940a1291434c3982ff71002291ebdd1316168eedb29ac04e13a11",
           "sizeBytes": 503094,
           "version": "1.0.0"
