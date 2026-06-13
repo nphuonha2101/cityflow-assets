@@ -43,6 +43,19 @@ def main():
     if not tag.startswith('v'):
         tag = 'v' + tag
 
+    # Check if tag already exists in remote repository
+    print(f"Checking if release tag '{tag}' already exists on remote...")
+    try:
+        check_tag = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            capture_output=True, text=True, check=True
+        )
+        if check_tag.stdout.strip():
+            print(f"Error: Release tag '{tag}' already exists on GitHub. Please use a new tag.")
+            sys.exit(1)
+    except Exception as e:
+        print(f"Warning: Could not verify remote tags ({e}). Proceeding anyway...")
+
     manifest_path = "assets_manifest.json"
     
     # 2. Read existing manifest
@@ -154,18 +167,27 @@ def main():
         sys.exit(0)
 
     # 4. Confirm and deploy
-    confirm = input(f"\nDo you want to commit/push and publish release '{tag}' now? (y/n): ").strip().lower()
+    confirm = input(f"\nDo you want to publish release '{tag}' and upload assets now? (y/n): ").strip().lower()
     if confirm != 'y':
-        print("Publishing cancelled. Manifest was NOT updated.")
+        print("Publishing cancelled.")
         sys.exit(0)
 
-    # Save manifest
-    with open(manifest_path, 'w', encoding='utf-8') as f:
-        json.dump(manifest, f, indent=2, ensure_ascii=False)
-    print(f"\nManifest successfully updated and written to '{manifest_path}'.")
-
-
     try:
+        # Create GH Release and upload assets first
+        print(f"\nCreating GitHub Release '{tag}' and uploading assets...")
+        release_cmd = [
+            "gh", "release", "create", tag,
+            *upload_filepaths,
+            "--title", f"Release {tag}",
+            "--notes", f"Auto-generated asset release for {tag}"
+        ]
+        subprocess.run(release_cmd, check=True)
+
+        # Only if upload succeeds, save the updated manifest locally
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+        print(f"\nManifest successfully updated and written to '{manifest_path}'.")
+
         # Commit & push manifest
         print("\nAdding and committing manifest...")
         subprocess.run(["git", "add", manifest_path], check=True)
@@ -176,22 +198,13 @@ def main():
         
         print("Pushing to main branch...")
         subprocess.run(["git", "push", "origin", "main"], check=True)
-
-        # Create GH Release and upload assets
-        print(f"Creating GitHub Release '{tag}' and uploading assets...")
-        release_cmd = [
-            "gh", "release", "create", tag,
-            *upload_filepaths,
-            "--title", f"Release {tag}",
-            "--notes", f"Auto-generated asset release for {tag}"
-        ]
-        subprocess.run(release_cmd, check=True)
         
         print("\n=== SUCCESS! Assets and Manifest published successfully! ===")
         print(f"Raw Manifest URL: https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{manifest_path}")
 
     except subprocess.CalledProcessError as e:
         print(f"\nError occurred during deployment: {e}")
+        print("Manifest was NOT updated on remote repository due to failure.")
         sys.exit(1)
 
 if __name__ == "__main__":
