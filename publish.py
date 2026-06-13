@@ -4,10 +4,25 @@ import json
 import hashlib
 import subprocess
 import sys
+import urllib.request
 
 # Target Github repo info
 REPO_OWNER = "nphuonha2101"
 REPO_NAME = "cityflow-assets"
+
+def check_url_exists(url):
+    try:
+        req = urllib.request.Request(url, method='HEAD', headers={'User-Agent': 'CityFlow-Verifier/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status < 400
+    except Exception:
+        # Fallback to GET request just in case HEAD is blocked/unsupported
+        try:
+            req_get = urllib.request.Request(url, headers={'User-Agent': 'CityFlow-Verifier/1.0'})
+            with urllib.request.urlopen(req_get, timeout=5) as resp:
+                return resp.status < 400
+        except Exception:
+            return False
 
 def get_file_sha256(filepath):
     h = hashlib.sha256()
@@ -112,15 +127,26 @@ def main():
             existing = existing_assets.get(filename)
             version = "1.0.0"
             
-            if existing and existing.get("sha256") == sha256_hash and existing.get("sizeBytes") == size:
+            remote_exists = False
+            if existing:
+                download_url = existing.get("url")
+                if download_url:
+                    print(f"    -> Verifying remote asset availability at: {download_url}")
+                    remote_exists = check_url_exists(download_url)
+            
+            if existing and existing.get("sha256") == sha256_hash and existing.get("sizeBytes") == size and remote_exists:
                 version = existing.get("version", "1.0.0")
                 download_url = existing.get("url")
-                print(f"    -> File has NOT changed. Keeping version {version} and URL.")
+                print(f"    -> File has NOT changed and is available remotely. Keeping version {version} and URL.")
             else:
                 if existing:
                     old_version = existing.get("version", "1.0.0")
-                    version = increment_version(old_version)
-                    print(f"    -> File CHANGED! Auto-incrementing version {old_version} -> {version}.")
+                    if not remote_exists and existing.get("sha256") == sha256_hash and existing.get("sizeBytes") == size:
+                        version = old_version
+                        print(f"    -> WARNING: Remote asset not found on server (HTTP 404/failure). Forcing re-upload under existing version {version}.")
+                    else:
+                        version = increment_version(old_version)
+                        print(f"    -> File CHANGED! Auto-incrementing version {old_version} -> {version}.")
                 else:
                     print(f"    -> File is new. Starting version {version}.")
                 
@@ -187,6 +213,38 @@ def main():
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
         print(f"\nManifest successfully updated and written to '{manifest_path}'.")
+
+        # Verify the newly uploaded assets on GitHub
+        print("\nVerifying newly uploaded assets on GitHub...")
+        all_ok = True
+        for city_id, city_data in manifest.get("cities", {}).items():
+            for asset in city_data.get("assets", []):
+                asset_url = asset["url"]
+                # Verify if the URL points to the newly created tag
+                if f"/releases/download/{tag}/" in asset_url:
+                    print(f"  Verifying {asset['name']} at {asset_url}...")
+                    ok = False
+                    # Retries with a sleep of 3 seconds (allowing GitHub CDN replication delay)
+                    for attempt in range(1, 4):
+                        if check_url_exists(asset_url):
+                            ok = True
+                            break
+                        print(f"    [Attempt {attempt}/3] Asset not available yet, waiting 3 seconds...")
+                        import time
+                        time.sleep(3)
+                    
+                    if ok:
+                        print(f"    -> {asset['name']}: VERIFIED!")
+                    else:
+                        print(f"    -> ERROR: {asset['name']} failed verification! It is not downloadable.")
+                        all_ok = False
+                        
+        if not all_ok:
+            print("\nError: One or more uploaded assets failed remote verification!")
+            confirm = input("Do you want to proceed with committing the manifest anyway? (y/n): ").strip().lower()
+            if confirm != 'y':
+                print("Deployment aborted. Manifest was NOT committed or pushed.")
+                sys.exit(1)
 
         # Commit & push manifest
         print("\nAdding and committing manifest...")
