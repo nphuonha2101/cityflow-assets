@@ -16,7 +16,7 @@ parser.add_argument("--max-lat", type=float, help="Override maximum latitude")
 parser.add_argument("--min-lon", type=float, help="Override minimum longitude")
 parser.add_argument("--max-lon", type=float, help="Override maximum longitude")
 parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
-parser.add_argument("--close-dist-km", type=float, default=1.0, help="Radius (in km) within which all stop pairs are precalculated")
+parser.add_argument("--close-dist-km", type=float, default=1.2, help="Radius (in km) within which all stop pairs are precalculated (default: 1.2)")
 parser.add_argument("--k-neighbors", type=int, default=10, help="Number of nearest neighbors to keep within the maximum distance")
 parser.add_argument("--max-dist-km", type=float, default=6.0, help="Maximum distance (in km) to consider for route generation")
 args, unknown = parser.parse_known_args()
@@ -46,15 +46,74 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.asin(math.sqrt(a))
     return c * 6371.0
 
+def decode_polyline(polyline_str):
+    coordinates = []
+    index = 0
+    lat = 0
+    lng = 0
+    try:
+        while index < len(polyline_str):
+            shift = 0
+            result = 0
+            while True:
+                b = ord(polyline_str[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if not (b & 0x20):
+                    break
+            dlat = ~(result >> 1) if (result & 1) else (result >> 1)
+            lat += dlat
+            
+            shift = 0
+            result = 0
+            while True:
+                b = ord(polyline_str[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if not (b & 0x20):
+                    break
+            dlng = ~(result >> 1) if (result & 1) else (result >> 1)
+            lng += dlng
+            coordinates.append((lat / 1e5, lng / 1e5))
+    except Exception:
+        pass
+    return coordinates
+
+def encode_polyline(coordinates):
+    polyline = []
+    prev_lat = 0
+    prev_lng = 0
+    
+    for lat, lng in coordinates:
+        late5 = int(round(lat * 1e5))
+        lnge5 = int(round(lng * 1e5))
+        
+        dlat = late5 - prev_lat
+        dlng = lnge5 - prev_lng
+        
+        prev_lat = late5
+        prev_lng = lnge5
+        
+        for val in [dlat, dlng]:
+            val = ~(val << 1) if val < 0 else (val << 1)
+            while val >= 0x20:
+                polyline.append(chr((0x20 | (val & 0x1f)) + 63))
+                val >>= 5
+            polyline.append(chr(val + 63))
+            
+    return "".join(polyline)
+
 def fetch_pair(stop_a, stop_b, idx, total):
     key = f"{stop_a['id']}-{stop_b['id']}"
     lon1, lat1 = stop_a['lon'], stop_a['lat']
     lon2, lat2 = stop_b['lon'], stop_b['lat']
     
-    # Try localhost first (fast local OSRM), then public fallback
+    # Try forward first: localhost, then public fallback
     urls = [
         f"http://localhost:5000/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline",
-        # f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
+        f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
     ]
     
     for url in urls:
@@ -67,7 +126,27 @@ def fetch_pair(stop_a, stop_b, idx, total):
                     netloc = urllib.parse.urlparse(url).netloc
                     return key, polyline_str, f"[{idx+1}/{total}] {stop_a['name']} -> {stop_b['name']}: OK (via {netloc})"
         except Exception:
-            # Fail silently and try next URL
+            continue
+            
+    # If forward route failed, attempt reverse route (B -> A) and reverse the coordinates
+    reverse_urls = [
+        f"http://localhost:5000/route/v1/driving/{lon2},{lat2};{lon1},{lat1}?overview=full&geometries=polyline",
+        f"http://router.project-osrm.org/route/v1/driving/{lon2},{lat2};{lon1},{lat1}?overview=full&geometries=polyline"
+    ]
+    for url in reverse_urls:
+        req = urllib.request.Request(url, headers={'User-Agent': 'CityFlow/1.0'})
+        try:
+            with urllib.request.urlopen(req, timeout=3) as response:
+                res_data = json.loads(response.read().decode())
+                if res_data.get('code') == 'Ok' and 'routes' in res_data and len(res_data['routes']) > 0:
+                    polyline_str = res_data['routes'][0]['geometry']
+                    coords = decode_polyline(polyline_str)
+                    if coords:
+                        reversed_coords = list(reversed(coords))
+                        reversed_polyline = encode_polyline(reversed_coords)
+                        netloc = urllib.parse.urlparse(url).netloc
+                        return key, reversed_polyline, f"[{idx+1}/{total}] {stop_a['name']} -> {stop_b['name']}: OK (REVERSED via {netloc})"
+        except Exception:
             continue
             
     return key, None, f"[{idx+1}/{total}] {stop_a['name']} -> {stop_b['name']}: FAILED"
@@ -118,8 +197,8 @@ def generate():
     
     # Calculate adaptive radii: base_radius * (avg_neighbor_dist / global_avg) ** power
     base_r = CLOSE_DISTANCE_KM
-    min_r = 0.2
-    max_r = MAX_DISTANCE_KM
+    min_r = CLOSE_DISTANCE_KM
+    max_r = max(CLOSE_DISTANCE_KM, MAX_DISTANCE_KM)
     power = 0.7
     
     radii = []
@@ -138,7 +217,23 @@ def generate():
             if distances_matrix[i][j] <= r:
                 edges.add((i, j))
                 
-    print(f"Generated {len(edges)} candidate edges using adaptive radius.")
+    print(f"Generated {len(edges)} candidate edges using adaptive radius (min radius = {CLOSE_DISTANCE_KM} km).")
+
+    # Add K-nearest neighbors within MAX_DISTANCE_KM
+    k_neighbors_edges_added = 0
+    for i in range(n_stops):
+        dists = sorted([(distances_matrix[i][j], j) for j in range(n_stops) if i != j], key=lambda x: x[0])
+        count = 0
+        for d, j in dists:
+            if d > MAX_DISTANCE_KM:
+                break
+            if count >= K_NEIGHBORS:
+                break
+            if (i, j) not in edges:
+                edges.add((i, j))
+                k_neighbors_edges_added += 1
+            count += 1
+    print(f"K-neighbors connectivity added {k_neighbors_edges_added} additional directed edges.")
 
     # ── [1.5/5] Add Sector-Based Nearest Neighbors (Directional/Cross-river Connectivity) ──
     print("Adding Sector-Based Nearest Neighbors...")
