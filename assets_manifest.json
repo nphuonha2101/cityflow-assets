@@ -13,10 +13,10 @@
         },
         {
           "name": "hcmc_routes_graph.hive",
-          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.0.10/hcmc_routes_graph.hive",
-          "sha256": "c591d43c93b4be4819f6dd177cb7998713adc49367a72ae7389449c7771d964c",
-          "sizeBytes": 47073414,
-          "version": "1.0.9"
+          "url": "https://github.com/nphuonha2101/cityflow-assets/releases/download/v1.1.2/hcmc_routes_graph.hive",
+          "sha256": "9b3dff36fced82cc3251918ccae1412cb8bd969d4e7ebfab59723d7344406a19",
+          "sizeBytes": 47539678,
+          "version": "1.0.10"
         },
         {
           "name": "hcmc_bus_stops.hive",
