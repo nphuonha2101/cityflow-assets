@@ -360,6 +360,38 @@ def generate():
                 
     print(f"Gap bridging added {new_edges_added} additional directed edges.")
     
+    # ── [2.5/5] Add Bid Route Sequential Connections ──
+    bid_routes_file = os.path.join(base_dir, CITY_FOLDER, f'{CITY_FOLDER}_bid_routes.json')
+    bid_edges_added = 0
+    if os.path.exists(bid_routes_file):
+        print(f"Loading bid routes from {bid_routes_file} to ensure 100% path coverage...")
+        try:
+            with open(bid_routes_file, 'r', encoding='utf-8') as f:
+                bid_data = json.load(f)
+            
+            # Map stop ID to its index in filtered_stops
+            stop_id_to_idx = {stop['id']: idx for idx, stop in enumerate(filtered_stops)}
+            
+            for route_tpl in bid_data:
+                for leg in ['outboundStopIds', 'inboundStopIds']:
+                    stop_ids = route_tpl.get(leg, [])
+                    for i in range(len(stop_ids) - 1):
+                        s1 = stop_ids[i]
+                        s2 = stop_ids[i+1]
+                        if s1 in stop_id_to_idx and s2 in stop_id_to_idx:
+                            idx1 = stop_id_to_idx[s1]
+                            idx2 = stop_id_to_idx[s2]
+                            if (idx1, idx2) not in edges:
+                                edges.add((idx1, idx2))
+                                bid_edges_added += 1
+                            # Add reverse for routing flexibility (if any)
+                            if (idx2, idx1) not in edges:
+                                edges.add((idx2, idx1))
+                                bid_edges_added += 1
+            print(f"Added {bid_edges_added} directed edges from bid routes to guarantee path connectivity.")
+        except Exception as e:
+            print(f"Error reading bid routes file: {e}")
+
     # Convert edges to stop pairs
     pairs_to_fetch = []
     for u, v in edges:
