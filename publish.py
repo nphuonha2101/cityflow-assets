@@ -100,12 +100,14 @@ def main():
         map_filename = f"{city_id}_map.pmtiles"
         routes_filename = f"{city_id}_routes_graph.hive"
         stops_filename = f"{city_id}_bus_stops.hive"
-        
+        bid_routes_filename = f"{city_id}_bid_routes.hive"
+
         map_path = os.path.join(folder, map_filename)
         routes_path = os.path.join(folder, routes_filename)
         stops_path = os.path.join(folder, stops_filename)
-        
-        # We only process if all three files exist for the city in its folder
+        bid_routes_path = os.path.join(folder, bid_routes_filename)
+
+        # We only process if all three core files exist for the city in its folder
         if not os.path.exists(map_path) or not os.path.exists(routes_path) or not os.path.exists(stops_path):
             print(f"Skipping city '{city_id}' (some files not found in '{folder}/')")
             continue
@@ -117,8 +119,12 @@ def main():
             for asset in manifest["cities"][city_id]["assets"]:
                 existing_assets[asset["name"]] = asset
 
+        file_pairs = [(map_filename, map_path), (routes_filename, routes_path), (stops_filename, stops_path)]
+        if os.path.exists(bid_routes_path):
+            file_pairs.append((bid_routes_filename, bid_routes_path))
+
         new_assets = []
-        for filename, filepath in [(map_filename, map_path), (routes_filename, routes_path), (stops_filename, stops_path)]:
+        for filename, filepath in file_pairs:
             print(f"  Processing '{filepath}'...")
             size = os.path.getsize(filepath)
             sha256_hash = get_file_sha256(filepath)

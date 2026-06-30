@@ -216,7 +216,27 @@ def main():
         print(f"Successfully compiled routes to: {routes_hive_path} ({os.path.getsize(routes_hive_path)} bytes)")
     else:
         print(f"Note: {routes_json_path} not found, skipping routes compilation.")
-        
+
+    # 3. Compile Bid Routes
+    bid_routes_json_path = os.path.join(city_dir, f"{city}_bid_routes.json")
+    if os.path.exists(bid_routes_json_path):
+        print(f"Compiling bid routes from {bid_routes_json_path}...")
+        with open(bid_routes_json_path, 'r', encoding='utf-8') as f:
+            bid_routes_json_str = f.read()
+
+        try:
+            json.loads(bid_routes_json_str)
+        except Exception as e:
+            print(f"Error: Invalid JSON format in {bid_routes_json_path}: {e}")
+            sys.exit(1)
+
+        bid_routes_hive_path = os.path.join(city_dir, f"{city}_bid_routes.hive")
+        with open(bid_routes_hive_path, 'wb') as f:
+            f.write(build_hive_frame('bid_routes', bid_routes_json_str))
+        print(f"Successfully compiled bid routes to: {bid_routes_hive_path} ({os.path.getsize(bid_routes_hive_path)} bytes)")
+    else:
+        print(f"Note: {bid_routes_json_path} not found, skipping bid routes compilation.")
+
     print("Done!")
 
 if __name__ == '__main__':
